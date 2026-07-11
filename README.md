@@ -51,11 +51,12 @@ Colab에서 `colab_pipeline.ipynb`를 열고 위에서 아래로 실행합니다
 아래 5개 셀을 순서대로 실행합니다.
 
 ```text
-1) Setup + data unzip
-2) Dataset, collator, prediction helpers
-3) Train
-4) Eval + best checkpoint by exact True
-5) Inference + submission with best checkpoint loaded above
+1) Install dependencies, then restart runtime once
+2) Setup + data unzip
+3) Dataset, collator, prediction helpers
+4) Train
+5) Eval + best checkpoint by exact True
+6) Inference + submission with best checkpoint loaded above
 ```
 
 `3) Train` 셀은 학습 후 `OUTPUT_DIR`에 LoRA adapter와 checkpoint를 저장합니다.
@@ -67,10 +68,11 @@ Colab에서 `colab_pipeline.ipynb`를 열고 위에서 아래로 실행합니다
 실행 순서:
 
 ```text
-1) Setup + data unzip
-2) Dataset, collator, prediction helpers
-4) Eval + best checkpoint by exact True
-5) Inference + submission with best checkpoint loaded above
+1) Install dependencies, then restart runtime once
+2) Setup + data unzip
+3) Dataset, collator, prediction helpers
+5) Eval + best checkpoint by exact True
+6) Inference + submission with best checkpoint loaded above
 ```
 
 단, train 셀을 건너뛰면 `processor`와 `bnb_config`가 아직 없을 수 있으므로 4번 셀 전에 아래 미니 셀을 한 번 실행합니다.
