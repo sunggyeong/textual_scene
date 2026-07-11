@@ -4,13 +4,13 @@
 
 ## 파일 구성
 
-- `simple_colab_pipeline.ipynb`: 권장 실행 노트북입니다. setup, dataset, train, eval, inference가 5개 셀로 정리되어 있습니다.
+- `colab_pipeline.ipynb`: 권장 실행 노트북입니다. setup, dataset, train, eval, inference가 5개 셀로 정리되어 있습니다.
 - `pre.ipynb`: 데이터 압축 해제와 기본 경로 확인용 기존 노트북입니다.
 - `train.ipynb`: 학습용 기존 노트북입니다.
 - `eval.ipynb`: 검증 평가용 기존 노트북입니다.
 - `inference.ipynb`: 제출 파일 생성용 기존 노트북입니다.
 
-새로 실행할 때는 `simple_colab_pipeline.ipynb`만 사용하는 것을 권장합니다.
+새로 실행할 때는 `colab_pipeline.ipynb`만 사용하는 것을 권장합니다.
 
 ## 데이터 위치
 
@@ -44,7 +44,7 @@ SUBMIT_PATH = "/content/outputs/submission.csv"
 
 ## 권장 실행 방법
 
-Colab에서 `simple_colab_pipeline.ipynb`를 열고 위에서 아래로 실행합니다.
+Colab에서 `colab_pipeline.ipynb`를 열고 위에서 아래로 실행합니다.
 
 ### 처음부터 학습 + 평가 + 추론
 
@@ -117,7 +117,7 @@ EVAL_TASKS = ("ORDER",)
 
 ## 평가 항목
 
-`simple_colab_pipeline.ipynb`의 4번 셀은 다음을 확인합니다.
+`colab_pipeline.ipynb`의 4번 셀은 다음을 확인합니다.
 
 - validation exact-match accuracy
 - 맞힌 개수
@@ -142,7 +142,7 @@ BEST_CHECKPOINT_EVAL_LIMIT = None
 
 ## 주요 설정
 
-`simple_colab_pipeline.ipynb`의 1번 셀에서 주로 바꿀 수 있는 값입니다.
+`colab_pipeline.ipynb`의 1번 셀에서 주로 바꿀 수 있는 값입니다.
 
 ```python
 MODEL_ID = "Qwen/Qwen2-VL-2B-Instruct"
