@@ -125,10 +125,10 @@ MAX_TRAIN_STEPS = 500
 
 ```python
 TASK_RATIOS = {
-    "pairwise": 0.35,
-    "first": 0.20,
-    "last": 0.20,
-    "order": 0.25,
+    "pairwise": 0.40,
+    "first": 0.15,
+    "last": 0.15,
+    "order": 0.30,
 }
 ```
 
@@ -150,9 +150,9 @@ TASK_RATIOS = {
 ```python
 TASK_LOSS_WEIGHTS = {
     "pairwise": 1.0,
-    "first": 1.3,
-    "last": 1.3,
-    "order": 1.15,
+    "first": 1.0,
+    "last": 1.0,
+    "order": 1.0,
 }
 ```
 
