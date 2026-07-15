@@ -58,12 +58,12 @@ python run_qwen3vl_structured.py --mode all --config configs/pilot.json
 
 Modes:
 
-- `check`: CUDA, model/processor, CSV, image path, answer parsing checks.
-- `pilot`: short train run, then Quick50 structured evaluation.
+- `check`: CUDA, dataset, processor, 4-bit model loading, and LoRA target checks.
+- `pilot`: short train run, then evaluates every saved `checkpoint-*` plus `final_adapter`.
 - `train`: train LoRA adapter.
 - `eval`: evaluate a checkpoint on quick/tuning/holdout splits.
 - `infer`: create `submission.csv`.
-- `all`: train, evaluate, and infer using the selected best checkpoint.
+- `all`: train and evaluate only. Run `infer` explicitly after choosing a checkpoint.
 
 ## Task Setup
 
@@ -113,12 +113,21 @@ outputs/<run_name>/
   train_config.json
   dataset_check.json
   lora_modules.txt
+  all_module_names.txt
   checkpoint-*
   probability_cache/
+  splits/
   quick_metrics.csv
   holdout_metrics.csv
+  <checkpoint>_quick_metrics.csv
+  <checkpoint>_holdout_metrics.csv
+  <checkpoint>_predictions.csv
   decoding_grid.csv
   predictions.csv
+  pilot_checkpoint_results.json
   best_config.json
   submission.csv
 ```
+
+The full config intentionally caps training at `max_train_steps = 4000`; one
+full epoch over the balanced 4-task record pool can be much longer on Qwen3-VL.

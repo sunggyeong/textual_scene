@@ -224,6 +224,30 @@ def split_train_valid(train_df: pd.DataFrame, config: dict[str, Any]) -> tuple[p
     return training_df, validation_df
 
 
+def save_split_ids(paths: Paths, training_df: pd.DataFrame, validation_df: pd.DataFrame, quick_rows: pd.DataFrame | None = None, tuning_rows: pd.DataFrame | None = None, holdout_rows: pd.DataFrame | None = None) -> None:
+    splits_dir = paths.output_dir / "splits"
+    save_json(training_df["Id"].astype(str).tolist(), splits_dir / "train_ids.json")
+    save_json(validation_df["Id"].astype(str).tolist(), splits_dir / "validation_ids.json")
+    if quick_rows is not None:
+        save_json(quick_rows["Id"].astype(str).tolist(), splits_dir / "quick_ids.json")
+    if tuning_rows is not None:
+        save_json(tuning_rows["Id"].astype(str).tolist(), splits_dir / "tuning_ids.json")
+    if holdout_rows is not None:
+        save_json(holdout_rows["Id"].astype(str).tolist(), splits_dir / "holdout_ids.json")
+
+
+def list_adapter_checkpoints(output_dir: Path) -> list[Path]:
+    def step_key(path: Path) -> int:
+        match = re.search(r"checkpoint-(\d+)", path.name)
+        return int(match.group(1)) if match else 10**12
+
+    checkpoints = sorted(output_dir.glob("checkpoint-*"), key=step_key)
+    final_adapter = output_dir / "final_adapter"
+    if final_adapter.exists():
+        checkpoints.append(final_adapter)
+    return [path for path in checkpoints if (path / "adapter_config.json").exists()]
+
+
 def pairwise_target(positions: list[int], first_index: int, second_index: int) -> str:
     return "1" if int(positions[first_index]) < int(positions[second_index]) else "2"
 
@@ -241,8 +265,9 @@ def base_record(row_index: int, row: pd.Series, image_root: Path) -> dict[str, A
     }
 
 
-def build_record_pools(dataframe: pd.DataFrame, image_root: Path, task_ratios: dict[str, float]) -> dict[str, list[dict[str, Any]]]:
+def build_record_pools(dataframe: pd.DataFrame, image_root: Path, task_ratios: dict[str, float], seed: int) -> dict[str, list[dict[str, Any]]]:
     pools = {task: [] for task in task_ratios}
+    rng = np.random.default_rng(seed)
     for row_index, row in dataframe.iterrows():
         base = base_record(row_index, row, image_root)
         if "order" in pools:
@@ -259,13 +284,19 @@ def build_record_pools(dataframe: pd.DataFrame, image_root: Path, task_ratios: d
             pools["last"].append(item)
         if "pairwise" in pools:
             for first_index, second_index in PAIR_INDICES:
+                if rng.random() < 0.5:
+                    candidate_a = first_index
+                    candidate_b = second_index
+                else:
+                    candidate_a = second_index
+                    candidate_b = first_index
                 item = dict(base)
                 item.update({
                     "task_type": "pairwise",
-                    "first_index": first_index,
-                    "second_index": second_index,
-                    "image_paths": [base["image_paths"][first_index], base["image_paths"][second_index]],
-                    "target": pairwise_target(base["positions"], first_index, second_index),
+                    "first_index": candidate_a,
+                    "second_index": candidate_b,
+                    "image_paths": [base["image_paths"][candidate_a], base["image_paths"][candidate_b]],
+                    "target": pairwise_target(base["positions"], candidate_a, candidate_b),
                 })
                 pools["pairwise"].append(item)
     return pools
@@ -278,9 +309,9 @@ def sample_records(records: list[dict[str, Any]], count: int, rng: np.random.Gen
 
 def build_balanced_records(dataframe: pd.DataFrame, image_root: Path, config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     ratios = {key: float(value) for key, value in config["task_ratios"].items()}
-    pools = build_record_pools(dataframe, image_root, ratios)
+    pools = build_record_pools(dataframe, image_root, ratios, int(config.get("seed", 42)))
     anchor_task = "pairwise" if "pairwise" in pools else next(iter(pools))
-    base_total = int(math.ceil(len(pools[anchor_task]) / ratios[anchor_task]))
+    base_total = int(config.get("train_record_count") or math.ceil(len(pools[anchor_task]) / ratios[anchor_task]))
     rng = np.random.default_rng(int(config.get("seed", 42)))
     merged = []
     for task, ratio in ratios.items():
@@ -472,13 +503,15 @@ def load_base_model(config: dict[str, Any], for_training: bool) -> Any:
             bnb_4bit_compute_dtype=compute_dtype,
         )
     model_cls = load_model_class()
-    model = model_cls.from_pretrained(
-        config["model_id"],
-        quantization_config=quant_config,
-        torch_dtype=compute_dtype,
-        device_map="auto",
-        trust_remote_code=True,
-    )
+    model_kwargs = {
+        "quantization_config": quant_config,
+        "torch_dtype": compute_dtype,
+        "device_map": "auto",
+        "trust_remote_code": True,
+    }
+    if config.get("attn_implementation"):
+        model_kwargs["attn_implementation"] = config["attn_implementation"]
+    model = model_cls.from_pretrained(config["model_id"], **model_kwargs)
     model.config.use_cache = False
     if for_training:
         model = prepare_model_for_kbit_training(
@@ -488,25 +521,31 @@ def load_base_model(config: dict[str, Any], for_training: bool) -> Any:
     return model
 
 
-def discover_linear_modules(model: Any, output_path: Path) -> list[str]:
-    module_names = []
+def discover_lora_targets(model: Any, output_path: Path) -> list[str]:
+    preferred = {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"}
+    all_names = []
+    matched = set()
     for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear):
-            leaf = name.split(".")[-1]
-            module_names.append(leaf)
-    unique = sorted(set(module_names))
+        all_names.append(f"{name}\t{module.__class__.__module__}.{module.__class__.__name__}")
+        leaf = name.rsplit(".", 1)[-1]
+        if leaf in preferred:
+            matched.add(leaf)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(unique) + "\n", encoding="utf-8")
-    preferred = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-    selected = [name for name in preferred if name in unique]
-    return selected or unique
+    output_path.write_text("\n".join(all_names) + "\n", encoding="utf-8")
+    selected = sorted(matched)
+    if not selected:
+        raise RuntimeError(
+            "No supported LoRA target modules were found. Inspect lora_modules.txt "
+            "and set lora_target_modules explicitly."
+        )
+    return selected
 
 
 def build_train_model(config: dict[str, Any], paths: Paths) -> Any:
     model = load_base_model(config, for_training=True)
     target_modules = config.get("lora_target_modules")
     if not target_modules:
-        target_modules = discover_linear_modules(model, paths.output_dir / "lora_modules.txt")
+        target_modules = discover_lora_targets(model, paths.output_dir / "lora_modules.txt")
     lora_config = LoraConfig(
         r=int(config.get("lora_r", 16)),
         lora_alpha=int(config.get("lora_alpha", 32)),
@@ -569,35 +608,67 @@ def make_eval_example(row: pd.Series, image_root: Path, task_type: str, pair: tu
 
 
 @no_grad_decorator
-def score_candidate_strings(model: Any, processor: Any, example: dict[str, Any], candidates: list[str]) -> dict[str, float]:
+def score_next_token_candidates(model: Any, processor: Any, example: dict[str, Any], candidates: list[str]) -> dict[str, float]:
     old_padding_side = processor.tokenizer.padding_side
-    processor.tokenizer.padding_side = "right"
-    prompt_text = processor.apply_chat_template(make_messages(example, include_answer=False), tokenize=False, add_generation_prompt=True)
-    images = [load_rgb(Path(path)) for path in example["image_paths"]]
-    scores = []
-    for candidate in candidates:
-        full_text = prompt_text + str(candidate)
-        encoded = processor(text=[full_text], images=[images], return_tensors="pt")
+    try:
+        processor.tokenizer.padding_side = "right"
+        prompt_text = processor.apply_chat_template(make_messages(example, include_answer=False), tokenize=False, add_generation_prompt=True)
+        images = [load_rgb(Path(path)) for path in example["image_paths"]]
+        encoded = processor(text=[prompt_text], images=[images], return_tensors="pt")
         encoded = {key: value.to(model_device(model)) if torch.is_tensor(value) else value for key, value in encoded.items()}
-        labels = encoded["input_ids"].clone()
-        prompt_encoded = processor(text=[prompt_text], images=[images], return_tensors="pt")
-        prompt_len = int(prompt_encoded["input_ids"].shape[1])
-        labels[:, :prompt_len] = -100
         outputs = model(**encoded)
-        logits = outputs.logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
-        loss = torch.nn.functional.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            shift_labels.view(-1),
-            reduction="none",
-            ignore_index=-100,
-        ).view_as(shift_labels)
-        token_mask = shift_labels.ne(-100)
-        logprob = -(loss * token_mask).sum().float().item()
-        scores.append(logprob)
-    probs = torch.softmax(torch.tensor(scores, dtype=torch.float32), dim=0).numpy()
-    processor.tokenizer.padding_side = old_padding_side
-    return {candidate: float(prob) for candidate, prob in zip(candidates, probs)}
+        last_pos = int(encoded["attention_mask"][0].sum().item()) - 1 if "attention_mask" in encoded else -1
+        next_logits = outputs.logits[0, last_pos]
+        candidate_ids = []
+        for candidate in candidates:
+            ids = processor.tokenizer.encode(str(candidate), add_special_tokens=False)
+            if len(ids) != 1:
+                raise ValueError(f"Candidate is not one token: {candidate} -> {ids}")
+            candidate_ids.append(ids[0])
+        selected_logits = next_logits[candidate_ids]
+        probs = torch.softmax(selected_logits.float(), dim=0).detach().cpu().tolist()
+        return {candidate: float(prob) for candidate, prob in zip(candidates, probs)}
+    finally:
+        processor.tokenizer.padding_side = old_padding_side
+
+
+@no_grad_decorator
+def score_candidate_strings(model: Any, processor: Any, example: dict[str, Any], candidates: list[str]) -> dict[str, float]:
+    try:
+        return score_next_token_candidates(model, processor, example, candidates)
+    except ValueError:
+        pass
+
+    old_padding_side = processor.tokenizer.padding_side
+    try:
+        processor.tokenizer.padding_side = "right"
+        prompt_text = processor.apply_chat_template(make_messages(example, include_answer=False), tokenize=False, add_generation_prompt=True)
+        images = [load_rgb(Path(path)) for path in example["image_paths"]]
+        scores = []
+        for candidate in candidates:
+            full_text = prompt_text + str(candidate)
+            encoded = processor(text=[full_text], images=[images], return_tensors="pt")
+            encoded = {key: value.to(model_device(model)) if torch.is_tensor(value) else value for key, value in encoded.items()}
+            labels = encoded["input_ids"].clone()
+            prompt_encoded = processor(text=[prompt_text], images=[images], return_tensors="pt")
+            prompt_len = int(prompt_encoded["input_ids"].shape[1])
+            labels[:, :prompt_len] = -100
+            outputs = model(**encoded)
+            logits = outputs.logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = torch.nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                shift_labels.view(-1),
+                reduction="none",
+                ignore_index=-100,
+            ).view_as(shift_labels)
+            token_mask = shift_labels.ne(-100)
+            logprob = -(loss * token_mask).sum().float().item()
+            scores.append(logprob)
+        probs = torch.softmax(torch.tensor(scores, dtype=torch.float32), dim=0).numpy()
+        return {candidate: float(prob) for candidate, prob in zip(candidates, probs)}
+    finally:
+        processor.tokenizer.padding_side = old_padding_side
 
 
 def extract_probability_cache(config: dict[str, Any], paths: Paths, processor: Any, model: Any, rows: pd.DataFrame, image_root: Path, checkpoint_name: str, tag: str) -> list[dict[str, Any]]:
@@ -688,7 +759,7 @@ def evaluate_decoding(samples: list[dict[str, Any]], alpha: float, beta: float, 
             "sample_id": sample["sample_id"],
             "pred_order": pred,
             "gold_order": gold,
-            "pairwise_accuracy": sample["pairwise_accuracy"],
+            "task_pairwise_accuracy": sample["pairwise_accuracy"],
             "task_first_accuracy": sample["task_first_accuracy"],
             "task_last_accuracy": sample["task_last_accuracy"],
             "task_first_last_both_correct": float(sample["task_first_accuracy"] == 1.0 and sample["task_last_accuracy"] == 1.0),
@@ -703,7 +774,7 @@ def evaluate_decoding(samples: list[dict[str, Any]], alpha: float, beta: float, 
         "pair_accuracy": df["pair_accuracy"].mean(),
         "position_accuracy": df["position_accuracy"].mean(),
         "valid_output_rate": df["valid_output"].mean(),
-        "mean_pairwise_accuracy": df["pairwise_accuracy"].mean(),
+        "mean_task_pairwise_accuracy": df["task_pairwise_accuracy"].mean(),
         "task_first_accuracy": df["task_first_accuracy"].mean(),
         "task_last_accuracy": df["task_last_accuracy"].mean(),
         "task_first_last_both_correct_rate": df["task_first_last_both_correct"].mean(),
@@ -794,7 +865,14 @@ def run_check(config: dict[str, Any], paths: Paths, fast_check: bool = False) ->
         token_info[repr(value)] = processor.tokenizer.encode(value, add_special_tokens=False)
     save_json(token_info, paths.output_dir / "digit_tokenization.json")
     print("digit tokenization:", token_info)
-    print("Processor load OK.")
+    model = load_base_model(config, for_training=True)
+    targets = discover_lora_targets(model, paths.output_dir / "all_module_names.txt")
+    print("LoRA candidates:", targets)
+    print("GPU memory allocated GB:", torch.cuda.memory_allocated() / 1024**3)
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    print("Processor/model/LoRA target check OK.")
 
 
 def run_train(config: dict[str, Any], paths: Paths) -> Path:
@@ -808,6 +886,7 @@ def run_train(config: dict[str, Any], paths: Paths) -> Path:
     train_df, _, _ = read_data(paths)
     train_df = add_answer_columns(train_df)
     training_df, validation_df = split_train_valid(train_df, config)
+    save_split_ids(paths, training_df, validation_df)
     train_records, train_pools = build_balanced_records(training_df, paths.train_image_root, config)
     save_json(
         {
@@ -875,18 +954,24 @@ def run_eval(config: dict[str, Any], paths: Paths, checkpoint: Path | None) -> d
     train_df, _, _ = read_data(paths)
     train_df = add_answer_columns(train_df)
     _, validation_df = split_train_valid(train_df, config)
+    save_split_ids(paths, train_df[~train_df["Id"].isin(validation_df["Id"])].reset_index(drop=True), validation_df)
     shuffled = validation_df.sample(frac=1.0, random_state=int(config.get("seed", 42))).reset_index(drop=True)
     quick_n = min(int(config.get("quick_eval_rows", 50)), len(shuffled))
     quick_rows = shuffled.iloc[:quick_n].reset_index(drop=True)
-    tuning_rows = shuffled.iloc[quick_n:quick_n + min(150, max(0, len(shuffled) - quick_n))].reset_index(drop=True)
-    holdout_rows = shuffled.iloc[quick_n + len(tuning_rows):quick_n + len(tuning_rows) + min(150, max(0, len(shuffled) - quick_n - len(tuning_rows)))].reset_index(drop=True)
+    full_eval_rows = min(int(config.get("full_eval_rows", 300)), max(0, len(shuffled) - quick_n))
+    tuning_n = min(150, full_eval_rows // 2 if full_eval_rows > 1 else full_eval_rows)
+    holdout_n = min(150, max(0, full_eval_rows - tuning_n))
+    tuning_rows = shuffled.iloc[quick_n:quick_n + tuning_n].reset_index(drop=True)
+    holdout_rows = shuffled.iloc[quick_n + len(tuning_rows):quick_n + len(tuning_rows) + holdout_n].reset_index(drop=True)
     if len(tuning_rows) == 0:
         tuning_rows = quick_rows
     if len(holdout_rows) == 0:
         holdout_rows = quick_rows
+    save_split_ids(paths, train_df[~train_df["Id"].isin(validation_df["Id"])].reset_index(drop=True), validation_df, quick_rows, tuning_rows, holdout_rows)
     ckpt = checkpoint_label(checkpoint)
     quick_samples = extract_probability_cache(config, paths, processor, model, quick_rows, paths.train_image_root, ckpt, f"quick{len(quick_rows)}")
     quick_search = grid_search(config, paths, quick_samples, ckpt, f"quick{len(quick_rows)}")
+    quick_search.to_csv(paths.output_dir / f"{ckpt}_quick_metrics.csv", index=False)
     quick_search.to_csv(paths.output_dir / "quick_metrics.csv", index=False)
     tuning_samples = extract_probability_cache(config, paths, processor, model, tuning_rows, paths.train_image_root, ckpt, f"tuning{len(tuning_rows)}")
     holdout_samples = extract_probability_cache(config, paths, processor, model, holdout_rows, paths.train_image_root, ckpt, f"holdout{len(holdout_rows)}")
@@ -906,7 +991,9 @@ def run_eval(config: dict[str, Any], paths: Paths, checkpoint: Path | None) -> d
         "gamma": float(best_weights["gamma"]),
         "tuning_exact_match": float(best_weights["exact_match"]),
     })
+    pd.DataFrame([holdout_summary]).to_csv(paths.output_dir / f"{ckpt}_holdout_metrics.csv", index=False)
     pd.DataFrame([holdout_summary]).to_csv(paths.output_dir / "holdout_metrics.csv", index=False)
+    predictions.to_csv(paths.output_dir / f"{ckpt}_predictions.csv", index=False)
     predictions.to_csv(paths.output_dir / "predictions.csv", index=False)
     best_config = {
         "model_id": config["model_id"],
@@ -1038,12 +1125,15 @@ def main() -> None:
     elif args.mode == "infer":
         run_infer(config, paths, checkpoint)
     elif args.mode == "pilot":
-        ckpt = run_train(config, paths)
-        run_eval(config, paths, ckpt)
+        run_train(config, paths)
+        results = []
+        for ckpt in list_adapter_checkpoints(paths.output_dir):
+            result = run_eval(config, paths, ckpt)
+            results.append(result)
+        save_json(results, paths.output_dir / "pilot_checkpoint_results.json")
     elif args.mode == "all":
         ckpt = run_train(config, paths)
-        best = run_eval(config, paths, ckpt)
-        run_infer(config, paths, Path(best["checkpoint_dir"]))
+        run_eval(config, paths, ckpt)
     else:
         raise ValueError(args.mode)
 
