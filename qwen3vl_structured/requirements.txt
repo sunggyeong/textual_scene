@@ -1,0 +1,14 @@
+torch
+torchvision
+transformers>=4.57.0
+accelerate>=0.34.0
+peft
+bitsandbytes>=0.46.1
+pandas
+numpy
+pillow
+tqdm
+scikit-learn
+safetensors
+sentencepiece
+qwen-vl-utils
