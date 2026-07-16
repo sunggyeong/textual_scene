@@ -25,7 +25,7 @@ Edit `configs/pilot.json` or `configs/full_train.json`:
 
 ```json
 {
-  "data_root": "../datasets/snuaichallenge_data",
+  "data_root": "datasets/snuaichallenge_data",
   "output_dir": "outputs/qwen3vl_8b_4task_pilot"
 }
 ```
@@ -33,7 +33,7 @@ Edit `configs/pilot.json` or `configs/full_train.json`:
 Expected dataset:
 
 ```text
-../datasets/snuaichallenge_data/
+datasets/snuaichallenge_data/
   train.csv
   test.csv
   sample_submission.csv

@@ -9,10 +9,10 @@ Project directory:
 qwen3vl_structured/
 ```
 
-Put the dataset under the repository root:
+Put the dataset under the Qwen3-VL project directory:
 
 ```text
-datasets/snuaichallenge_data/
+qwen3vl_structured/datasets/snuaichallenge_data/
   train.csv
   test.csv
   sample_submission.csv

@@ -1,7 +1,7 @@
 {
   "run_name": "qwen3vl_8b_4task_pilot",
   "model_id": "Qwen/Qwen3-VL-8B-Instruct",
-  "data_root": "../datasets/snuaichallenge_data",
+  "data_root": "datasets/snuaichallenge_data",
   "output_dir": "outputs/qwen3vl_8b_4task_pilot",
   "seed": 42,
   "valid_ratio": 0.1,

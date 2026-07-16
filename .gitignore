@@ -1,0 +1,18 @@
+# Local dataset
+datasets/
+qwen3vl_structured/datasets/
+
+# Training outputs and caches
+qwen3vl_structured/outputs/
+qwen3vl_structured/**/__pycache__/
+qwen3vl_structured/**/*.pyc
+
+# Model/cache artifacts
+.cache/
+wandb/
+runs/
+
+# Environment files
+.venv/
+venv/
+*.env
