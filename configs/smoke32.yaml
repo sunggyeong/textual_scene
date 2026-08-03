@@ -1,0 +1,21 @@
+experiment_name: smoke32
+seed: 42
+output_dir: outputs
+
+model:
+  type: majority_baseline
+
+data:
+  synthetic_samples: 32
+  valid_ratio: 0.25
+  split_path: outputs/splits/smoke32_seed42.json
+
+training:
+  epochs: 1
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  learning_rate: 0.0001
+  save_steps: 100
+
+evaluation:
+  batch_size: 8

@@ -1,0 +1,16 @@
+accelerate>=0.34.0
+bitsandbytes>=0.46.1
+hf_xet
+huggingface_hub
+jedi
+modelscope
+numpy
+pandas==2.2.2
+peft
+Pillow
+PyYAML
+qwen-vl-utils
+safetensors>=0.4.5
+torch
+tqdm
+transformers>=4.49.0,<4.54.0
