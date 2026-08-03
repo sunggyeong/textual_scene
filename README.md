@@ -29,6 +29,13 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
+For structure tests without installing the heavy experiment stack:
+
+```bash
+pip install -e ".[dev]"
+pytest -q
+```
+
 Colab:
 
 ```bash

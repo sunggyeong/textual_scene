@@ -51,7 +51,7 @@ def split_samples(
         train_ids = split["train_ids"]
         valid_ids = split["valid_ids"]
         by_id = {sample.sample_id: sample for sample in samples}
-        return [by_id[item] for item in train_ids if item in by_id], [by_id[item] for item in valid_ids if item in by_id]
+        return _samples_by_ids(by_id, train_ids), _samples_by_ids(by_id, valid_ids)
 
     shuffled = list(samples)
     random.Random(seed).shuffle(shuffled)
@@ -79,7 +79,7 @@ def select_split_samples(samples: list[SceneSample], split_path: str | Path, spl
     key = split_keys[split]
     ids = split_data[key]
     by_id = {sample.sample_id: sample for sample in samples}
-    return [by_id[item] for item in ids if item in by_id]
+    return _samples_by_ids(by_id, ids)
 
 
 def validate_image_paths(samples: Iterable[SceneSample], image_root: str | Path | None = None) -> None:
@@ -133,9 +133,10 @@ def _row_to_sample(row: dict[str, Any], config: dict[str, Any], base_dir: Path) 
     order_column = config.get("order_column", "gold_order")
     image_columns = config.get("image_columns", [])
     caption_columns = config.get("caption_columns", [])
+    image_root = Path(config["image_root"]) if config.get("image_root") else base_dir
     sample_id = str(row.get(id_column) or row.get("id") or row.get("ID") or len(str(row)))
     order = parse_order(row[order_column])
-    image_paths = tuple(str((base_dir / row[col]).resolve()) if row.get(col) else "" for col in image_columns)
+    image_paths = tuple(resolve_image_path(row[col], image_root) if row.get(col) else "" for col in image_columns)
     image_paths = tuple(path for path in image_paths if path)
     captions = tuple(str(row[col]) for col in caption_columns if row.get(col))
     if image_columns and len(image_paths) != 4:
@@ -162,6 +163,13 @@ def parse_order(value: Any) -> tuple[int, int, int, int]:
     return validate_order(value)
 
 
+def resolve_image_path(value: Any, root: Path) -> str:
+    path = Path(str(value))
+    if path.is_absolute():
+        return str(path)
+    return str((root / path).resolve())
+
+
 def _validate_unique_ids(samples: list[SceneSample]) -> None:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -171,3 +179,11 @@ def _validate_unique_ids(samples: list[SceneSample]) -> None:
         seen.add(sample.sample_id)
     if duplicates:
         raise ValueError(f"Duplicate sample_id values found: {', '.join(duplicates[:5])}")
+
+
+def _samples_by_ids(by_id: dict[str, SceneSample], ids: list[str]) -> list[SceneSample]:
+    missing_ids = [sample_id for sample_id in ids if sample_id not in by_id]
+    if missing_ids:
+        preview = ", ".join(missing_ids[:5])
+        raise ValueError(f"Split contains IDs missing from the dataset: {preview}")
+    return [by_id[sample_id] for sample_id in ids]
