@@ -1,0 +1,45 @@
+experiment_name: lora_order_head
+seed: 42
+output_dir: outputs
+
+model:
+  type: lora_order_head
+  name_or_path: Qwen/Qwen2-VL-7B-Instruct
+  freeze_backbone: false
+  from_pretrained_kwargs: {}
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    bias: none
+    task_type: CAUSAL_LM
+
+data:
+  path:
+  id_column: sample_id
+  order_column: gold_order
+  image_columns:
+    - image_1
+    - image_2
+    - image_3
+    - image_4
+  image_root:
+  validate_images: true
+  caption_columns:
+    - caption_1
+    - caption_2
+    - caption_3
+    - caption_4
+  valid_ratio: 0.1
+  split_path: outputs/splits/lora_order_head_seed42.json
+
+training:
+  epochs: 1
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0001
+  save_steps: 100
+
+evaluation:
+  batch_size: 1
+  split: validation

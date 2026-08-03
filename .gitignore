@@ -1,0 +1,47 @@
+# Python cache / bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / type-check cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Notebook / Colab local state
+.ipynb_checkpoints/
+
+# Experiment outputs
+outputs/
+runs/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+
+# Local data and heavyweight model artifacts
+data/
+datasets/
+model_cache/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.bin
+
+# Local environment files
+.env
+.env.*
