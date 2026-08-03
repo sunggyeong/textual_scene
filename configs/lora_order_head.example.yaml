@@ -1,12 +1,18 @@
-experiment_name: frozen_order_head
+experiment_name: lora_order_head
 seed: 42
 output_dir: outputs
 
 model:
-  type: frozen_order_head
+  type: lora_order_head
   name_or_path: Qwen/Qwen2-VL-7B-Instruct
-  freeze_backbone: true
+  freeze_backbone: false
   from_pretrained_kwargs: {}
+  lora:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    bias: none
+    task_type: CAUSAL_LM
 
 data:
   path:
@@ -17,8 +23,15 @@ data:
     - image_2
     - image_3
     - image_4
+  image_root:
+  validate_images: true
+  caption_columns:
+    - caption_1
+    - caption_2
+    - caption_3
+    - caption_4
   valid_ratio: 0.1
-  split_path: outputs/splits/frozen_order_head_seed42.json
+  split_path: outputs/splits/lora_order_head_seed42.json
 
 training:
   epochs: 1
@@ -29,3 +42,4 @@ training:
 
 evaluation:
   batch_size: 1
+  split: validation

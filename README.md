@@ -48,27 +48,16 @@ Smoke-test the pipeline with 32 synthetic samples:
 python scripts/train_order_head.py --config configs/smoke32.yaml
 ```
 
-Run the frozen backbone order-head config after filling in `data.path` and model options:
+The frozen backbone and LoRA order-head files are example configs for the next experiment PR. They document the intended YAML shape, but the order-head model implementations are intentionally blocked in this structure PR:
 
 ```bash
-python scripts/train_order_head.py --config configs/frozen_order_head.yaml
-```
-
-Run the LoRA order-head config:
-
-```bash
-python scripts/train_order_head.py --config configs/lora_order_head.yaml
+configs/frozen_order_head.example.yaml
+configs/lora_order_head.example.yaml
 ```
 
 ## Evaluate
 
-```bash
-python scripts/evaluate.py \
-  --config configs/frozen_order_head.yaml \
-  --checkpoint outputs/frozen_order_head/checkpoints/last
-```
-
-For the local smoke test:
+For the local smoke test, evaluation uses `evaluation.split: validation` and reloads the saved split file so the evaluation target matches the training validation target:
 
 ```bash
 python scripts/evaluate.py \
@@ -111,14 +100,18 @@ Each run writes:
 ```text
 outputs/<experiment_name>/
   config.yaml
-  train_log.csv
-  metrics.json
-  predictions.csv
-  run_summary.txt
+  train/
+    train_log.csv
+    metrics.json
+    predictions.csv
+    run_summary.txt
+  eval/
+    metrics.json
+    predictions.csv
   checkpoints/
 ```
 
-`predictions.csv` contains:
+`train/metrics.json` and `eval/metrics.json` are intentionally separated so an independent evaluation command cannot overwrite the metrics produced during training. `predictions.csv` contains:
 
 ```text
 sample_id
@@ -135,3 +128,11 @@ position_accuracy
 ## Legacy Notebooks
 
 Historical notebooks are preserved under `experiments/legacy_notebooks/`. They remain useful as implementation records and result references, but new experiments should call the Python scripts and change only YAML configuration values.
+
+## Current Scope
+
+This PR is a repository-structure PR. The smoke baseline is present only to verify that data loading, split persistence, metric computation, checkpoint writing, and CLI entry points work end to end.
+
+The `training` YAML values such as `epochs`, `batch_size`, `gradient_accumulation_steps`, `learning_rate`, and `save_steps` are retained as the intended config contract. They will be wired to the real order-head trainer in the next experiment PR.
+
+Transformer-backed frozen/LoRA order-head checkpoint restoration is not implemented yet. Passing those model types raises `NotImplementedError` rather than silently loading a base model.

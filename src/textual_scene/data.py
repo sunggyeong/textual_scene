@@ -19,6 +19,7 @@ class SceneSample:
     gold_order: tuple[int, int, int, int]
     gold_class: int
     image_paths: tuple[str, ...] = ()
+    captions: tuple[str, ...] = ()
     metadata: dict[str, Any] | None = None
 
 
@@ -26,11 +27,16 @@ def load_samples(config: dict[str, Any]) -> list[SceneSample]:
     path = config.get("path")
     if path:
         samples = _load_file(Path(path), config)
-    else:
+    elif "synthetic_samples" in config:
         samples = make_synthetic_samples(int(config.get("synthetic_samples", 32)))
+    else:
+        raise ValueError("data.path is required unless data.synthetic_samples is set")
+    _validate_unique_ids(samples)
     limit = config.get("sample_limit")
     if limit:
         samples = samples[: int(limit)]
+    if config.get("validate_images", False):
+        validate_image_paths(samples, config.get("image_root"))
     return samples
 
 
@@ -42,8 +48,8 @@ def split_samples(
 ) -> tuple[list[SceneSample], list[SceneSample]]:
     if split_path and Path(split_path).exists():
         split = json.loads(Path(split_path).read_text(encoding="utf-8"))
-        train_ids = set(split["train_ids"])
-        valid_ids = set(split["valid_ids"])
+        train_ids = split["train_ids"]
+        valid_ids = split["valid_ids"]
         by_id = {sample.sample_id: sample for sample in samples}
         return [by_id[item] for item in train_ids if item in by_id], [by_id[item] for item in valid_ids if item in by_id]
 
@@ -65,6 +71,17 @@ def split_samples(
     return train, valid
 
 
+def select_split_samples(samples: list[SceneSample], split_path: str | Path, split: str) -> list[SceneSample]:
+    split_data = json.loads(Path(split_path).read_text(encoding="utf-8"))
+    split_keys = {"train": "train_ids", "validation": "valid_ids", "valid": "valid_ids"}
+    if split not in split_keys:
+        raise ValueError(f"Unknown evaluation split: {split}")
+    key = split_keys[split]
+    ids = split_data[key]
+    by_id = {sample.sample_id: sample for sample in samples}
+    return [by_id[item] for item in ids if item in by_id]
+
+
 def validate_image_paths(samples: Iterable[SceneSample], image_root: str | Path | None = None) -> None:
     root = Path(image_root) if image_root else None
     missing: list[str] = []
@@ -82,7 +99,15 @@ def make_synthetic_samples(count: int = 32) -> list[SceneSample]:
     samples: list[SceneSample] = []
     for idx in range(count):
         order = PERMUTATIONS[idx % len(PERMUTATIONS)]
-        samples.append(SceneSample(sample_id=f"synthetic_{idx:04d}", gold_order=order, gold_class=order_to_class(order)))
+        captions = tuple(f"synthetic caption {idx:04d}-{frame}" for frame in range(1, 5))
+        samples.append(
+            SceneSample(
+                sample_id=f"synthetic_{idx:04d}",
+                gold_order=order,
+                gold_class=order_to_class(order),
+                captions=captions,
+            )
+        )
     return samples
 
 
@@ -107,11 +132,24 @@ def _row_to_sample(row: dict[str, Any], config: dict[str, Any], base_dir: Path) 
     id_column = config.get("id_column", "sample_id")
     order_column = config.get("order_column", "gold_order")
     image_columns = config.get("image_columns", [])
+    caption_columns = config.get("caption_columns", [])
     sample_id = str(row.get(id_column) or row.get("id") or row.get("ID") or len(str(row)))
     order = parse_order(row[order_column])
     image_paths = tuple(str((base_dir / row[col]).resolve()) if row.get(col) else "" for col in image_columns)
     image_paths = tuple(path for path in image_paths if path)
-    return SceneSample(sample_id=sample_id, gold_order=order, gold_class=order_to_class(order), image_paths=image_paths, metadata=row)
+    captions = tuple(str(row[col]) for col in caption_columns if row.get(col))
+    if image_columns and len(image_paths) != 4:
+        raise ValueError(f"Expected exactly four image paths for sample {sample_id}, got {len(image_paths)}")
+    if caption_columns and len(captions) != 4:
+        raise ValueError(f"Expected exactly four captions for sample {sample_id}, got {len(captions)}")
+    return SceneSample(
+        sample_id=sample_id,
+        gold_order=order,
+        gold_class=order_to_class(order),
+        image_paths=image_paths,
+        captions=captions,
+        metadata=row,
+    )
 
 
 def parse_order(value: Any) -> tuple[int, int, int, int]:
@@ -122,3 +160,14 @@ def parse_order(value: Any) -> tuple[int, int, int, int]:
         else:
             value = stripped.replace(",", " ").split()
     return validate_order(value)
+
+
+def _validate_unique_ids(samples: list[SceneSample]) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for sample in samples:
+        if sample.sample_id in seen:
+            duplicates.append(sample.sample_id)
+        seen.add(sample.sample_id)
+    if duplicates:
+        raise ValueError(f"Duplicate sample_id values found: {', '.join(duplicates[:5])}")

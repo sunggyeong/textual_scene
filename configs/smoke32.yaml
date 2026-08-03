@@ -19,3 +19,4 @@ training:
 
 evaluation:
   batch_size: 8
+  split: validation

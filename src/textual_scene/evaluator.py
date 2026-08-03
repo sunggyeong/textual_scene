@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from textual_scene.data import SceneSample, load_samples
+from textual_scene.data import SceneSample, load_samples, select_split_samples
 from textual_scene.metrics import compute_order_metrics, sample_metrics
 from textual_scene.models import MajorityOrderModel, create_model
 from textual_scene.permutations import order_to_class
@@ -36,13 +36,24 @@ def evaluate_model(model: Any, samples: list[SceneSample]) -> tuple[dict[str, fl
 def run_evaluation(config: dict[str, Any], checkpoint: str | Path | None = None) -> dict[str, Any]:
     experiment_name = config.get("experiment_name", "evaluation")
     output_dir = Path(config.get("output_dir", "outputs")) / experiment_name
+    eval_dir = output_dir / "eval"
     output_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir.mkdir(parents=True, exist_ok=True)
     samples = load_samples(config.get("data", {}))
+    evaluation_config = config.get("evaluation", {})
+    split = evaluation_config.get("split")
+    if split:
+        split_path = config.get("data", {}).get("split_path")
+        if not split_path:
+            raise ValueError("evaluation.split requires data.split_path")
+        if not Path(split_path).exists():
+            raise FileNotFoundError(f"Split file not found: {split_path}")
+        samples = select_split_samples(samples, split_path, split)
     model = _load_model(config.get("model", {}), checkpoint)
     metrics, prediction_rows = evaluate_model(model, samples)
-    write_predictions(prediction_rows, output_dir / "predictions.csv")
-    (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    return {"output_dir": str(output_dir), "metrics": metrics}
+    write_predictions(prediction_rows, eval_dir / "predictions.csv")
+    (eval_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    return {"output_dir": str(output_dir), "eval_dir": str(eval_dir), "metrics": metrics}
 
 
 def write_predictions(rows: list[dict[str, Any]], path: str | Path) -> None:
@@ -66,6 +77,8 @@ def write_predictions(rows: list[dict[str, Any]], path: str | Path) -> None:
 
 
 def _load_model(model_config: dict[str, Any], checkpoint: str | Path | None) -> Any:
-    if checkpoint and (Path(checkpoint) / "model.json").exists():
-        return MajorityOrderModel.from_pretrained(checkpoint)
+    if checkpoint:
+        if (Path(checkpoint) / "model.json").exists():
+            return MajorityOrderModel.from_pretrained(checkpoint)
+        raise NotImplementedError("Only smoke baseline checkpoints are restorable in this structure PR.")
     return create_model(model_config)

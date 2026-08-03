@@ -43,8 +43,10 @@ def create_model(config: dict[str, Any]) -> Any:
     model_type = config.get("type", "majority_baseline")
     if model_type == "majority_baseline":
         return MajorityOrderModel()
-    if model_type in {"frozen_order_head", "lora_order_head", "lora_generation"}:
-        return create_transformers_model(config)
+    if model_type in {"frozen_order_head", "lora_order_head"}:
+        raise NotImplementedError("Order-head models will be implemented in the next experiment PR.")
+    if model_type == "lora_generation":
+        raise NotImplementedError("LoRA generation models will be wired in a dedicated experiment PR.")
     raise ValueError(f"Unknown model type: {model_type}")
 
 

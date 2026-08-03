@@ -18,8 +18,10 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
     seed = int(config.get("seed", 42))
     experiment_name = config.get("experiment_name") or datetime.now().strftime("experiment_%Y%m%d_%H%M%S")
     output_dir = Path(config.get("output_dir", "outputs")) / experiment_name
+    train_dir = output_dir / "train"
     checkpoint_dir = output_dir / "checkpoints"
     output_dir.mkdir(parents=True, exist_ok=True)
+    train_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     save_config(config, output_dir / "config.yaml")
 
@@ -38,10 +40,10 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         model.save_pretrained(checkpoint_dir / "last")
 
     metrics, prediction_rows = evaluate_model(model, valid_samples or train_samples)
-    _write_train_log(output_dir / "train_log.csv", train_samples, valid_samples)
-    write_predictions(prediction_rows, output_dir / "predictions.csv")
-    (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    (output_dir / "run_summary.txt").write_text(
+    _write_train_log(train_dir / "train_log.csv", train_samples, valid_samples)
+    write_predictions(prediction_rows, train_dir / "predictions.csv")
+    (train_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (train_dir / "run_summary.txt").write_text(
         "\n".join(
             [
                 f"experiment_name: {experiment_name}",
@@ -53,7 +55,7 @@ def run_training(config: dict[str, Any]) -> dict[str, Any]:
         + "\n",
         encoding="utf-8",
     )
-    return {"output_dir": str(output_dir), "metrics": metrics}
+    return {"output_dir": str(output_dir), "train_dir": str(train_dir), "metrics": metrics}
 
 
 def _write_train_log(path: Path, train_samples: list[Any], valid_samples: list[Any]) -> None:
